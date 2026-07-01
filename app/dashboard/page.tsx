@@ -40,6 +40,8 @@ export default function DashboardPage() {
   const [foods, setFoods] = useState<FoodItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [expandedFoodId, setExpandedFoodId] = useState<string | null>(null);
+
   const [filter, setFilter] = useState<
     "all" | "fridge" | "freezer" | "pantry" | "expiring"
   >("all");
@@ -98,35 +100,6 @@ export default function DashboardPage() {
   async function markAsUsed(id: string) {
     await supabase.from("food_items").update({ used: true }).eq("id", id);
     setFoods((current) => current.filter((food) => food.id !== id));
-  }
-  async function sendTestEmail() {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-  
-    if (!user?.email) return;
-  
-    if (kitchenSummary.reminders.length === 0) {
-      alert("No reminders to send right now.");
-      return;
-    }
-  
-    const response = await fetch("/api/send-reminder", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        email: user.email,
-        reminders: kitchenSummary.reminders,
-      }),
-    });
-  
-    if (response.ok) {
-      alert("Reminder email sent!");
-    } else {
-      alert("Something went wrong sending the email.");
-    }
   }
 
   async function deleteFood(id: string, name: string) {
@@ -204,7 +177,7 @@ export default function DashboardPage() {
 
           <h2 className="mt-2 font-serif text-2xl font-bold">
             {kitchenSummary.count > 0
-              ? `You have ${kitchenSummary.count} food${
+              ? `You have ${kitchenSummary.count} item${
                   kitchenSummary.count === 1 ? "" : "s"
                 } to use soon`
               : "Everything looks good today"}
@@ -222,12 +195,6 @@ export default function DashboardPage() {
             </p>
           )}
         </div>
-        <button
-          onClick={sendTestEmail}
-          className="mb-6 w-full rounded-2xl border border-[#E7E2D6] bg-white px-4 py-3 font-bold text-[#3F6B4F]"
-        >
-          📧 Send Test Reminder Email
-        </button>
 
         <div className="mb-6 grid grid-cols-3 gap-3">
           <div className="rounded-2xl border border-[#E7E2D6] bg-white p-4 text-center shadow-sm">
@@ -315,78 +282,108 @@ export default function DashboardPage() {
             </p>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-3">
             {filteredFoods.map((food) => {
               const Icon = locationIcons[food.location];
               const status = getFoodStatus(food.expiration_date);
-              const expiring = status === "expiring-soon";
               const expired = status === "expired";
+              const expiring = status === "expiring-soon";
+              const expanded = expandedFoodId === food.id;
 
               return (
                 <div
                   key={food.id}
-                  className="rounded-3xl border border-[#E7E2D6] bg-white p-4 shadow-sm"
+                  className="rounded-2xl border border-[#E7E2D6] bg-white px-4 py-3 shadow-sm"
                 >
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#E7EFE6] text-[#3F6B4F]">
-                      <Icon size={24} />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedFoodId(expanded ? null : food.id)
+                    }
+                    className="flex w-full items-center gap-3 text-left"
+                  >
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#E7EFE6] text-[#3F6B4F]">
+                      <Icon size={20} />
                     </div>
 
-                    <div className="flex-1">
-                      <h3 className="font-serif text-xl font-bold">
-                        {food.name}
-                      </h3>
-                      <p className="text-sm capitalize text-[#8A8578]">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="truncate font-serif text-lg font-bold">
+                          {food.name}
+                        </h3>
+
+                        <span
+                          className={`shrink-0 text-sm font-bold ${
+                            expired
+                              ? "text-[#A23B30]"
+                              : expiring
+                              ? "text-[#B5651D]"
+                              : "text-[#3F6B4F]"
+                          }`}
+                        >
+                          {getStatusLabel(food.expiration_date)}
+                        </span>
+                      </div>
+
+                      <p className="mt-1 text-sm capitalize text-[#8A8578]">
                         {food.quantity || "No quantity"} • {food.location}
                       </p>
                     </div>
+                  </button>
 
-                    <span
-                      className={`rounded-full px-3 py-1 text-xs font-bold ${
-                        expired
-                          ? "bg-[#F7E3DF] text-[#A23B30]"
-                          : expiring
-                          ? "bg-[#FBEBDC] text-[#B5651D]"
-                          : "bg-[#E7EFE6] text-[#3F6B4F]"
-                      }`}
-                    >
-                      {expired
-                        ? "Expired"
-                        : expiring
-                        ? "Expiring soon"
-                        : "Fresh"}
-                    </span>
-                  </div>
+                  {expanded && (
+                    <div className="mt-4 border-t border-[#E7E2D6] pt-4">
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <p className="font-bold text-[#2B2B26]">
+                            Purchased
+                          </p>
+                          <p className="mt-1 text-[#8A8578]">
+                            {food.purchase_date}
+                          </p>
+                        </div>
 
-                  <div className="mt-4 flex items-center justify-between gap-3">
-                    <p className="flex items-center gap-2 text-sm text-[#8A8578]">
-                      <Clock size={15} />{" "}
-                      {getStatusLabel(food.expiration_date)}
-                    </p>
+                        <div>
+                          <p className="font-bold text-[#2B2B26]">
+                            Best by
+                          </p>
+                          <p className="mt-1 text-[#8A8578]">
+                            {food.expiration_date}
+                          </p>
+                        </div>
+                      </div>
 
-                    <div className="flex gap-2">
-                      <Link
-                        href={`/edit/${food.id}`}
-                        className="rounded-full bg-[#F1EDE2] px-3 py-2 text-xs font-bold text-[#2B2B26]"
-                      >
-                        Edit
-                      </Link>
+                      {food.notes && (
+                        <div className="mt-4 text-sm">
+                          <p className="font-bold text-[#2B2B26]">Notes</p>
+                          <p className="mt-1 text-[#8A8578]">{food.notes}</p>
+                        </div>
+                      )}
 
-                      <button
-                        onClick={() => markAsUsed(food.id)}
-                        className="rounded-full bg-[#E7EFE6] px-3 py-2 text-xs font-bold text-[#3F6B4F]"
-                      >
-                        Used
-                      </button>
+                      <div className="mt-5 flex gap-2">
+                        <Link
+                          href={`/edit/${food.id}`}
+                          className="rounded-full bg-[#F1EDE2] px-4 py-2 text-sm font-bold text-[#2B2B26]"
+                        >
+                          Edit
+                        </Link>
 
-                      <button
-                        onClick={() => deleteFood(food.id, food.name)}
-                        className="rounded-full bg-[#F7E3DF] px-3 py-2 text-xs font-bold text-[#A23B30]"
-                      >
-                        Delete
-                      </button>
+                        <button
+                          onClick={() => markAsUsed(food.id)}
+                          className="rounded-full bg-[#E7EFE6] px-4 py-2 text-sm font-bold text-[#3F6B4F]"
+                        >
+                          Used
+                        </button>
+
+                        <button
+                          onClick={() => deleteFood(food.id, food.name)}
+                          className="rounded-full bg-[#F7E3DF] px-4 py-2 text-sm font-bold text-[#A23B30]"
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               );
             })}
@@ -402,7 +399,7 @@ export default function DashboardPage() {
           </div>
 
           <p className="text-[#8A8578]">
-            Soon, AI recipes will use your actual inventory and prioritize food
+            Create recipes using your actual inventory and prioritize food
             expiring first.
           </p>
 
@@ -410,7 +407,7 @@ export default function DashboardPage() {
             href="/recipes"
             className="mt-4 block rounded-2xl bg-[#3F6B4F] py-3 text-center font-bold text-white"
           >
-            See recipes
+            Generate Recipes
           </Link>
         </section>
       </section>
