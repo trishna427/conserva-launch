@@ -15,6 +15,7 @@ import {
   Refrigerator,
   Snowflake,
   Package,
+  ChevronDown,
 } from "lucide-react";
 
 type FoodItem = {
@@ -41,6 +42,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [expandedFoodId, setExpandedFoodId] = useState<string | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
 
   const [filter, setFilter] = useState<
     "all" | "fridge" | "freezer" | "pantry" | "expiring"
@@ -225,41 +227,51 @@ export default function DashboardPage() {
           className="mb-5 w-full rounded-2xl border border-[#E7E2D6] bg-white px-4 py-3 outline-none"
         />
 
-        <div className="mb-6 flex gap-2 overflow-x-auto pb-2">
-          {["all", "fridge", "freezer", "pantry", "expiring"].map((item) => (
-            <button
-              key={item}
-              onClick={() => setFilter(item as typeof filter)}
-              className={`whitespace-nowrap rounded-full px-4 py-2 text-sm font-bold ${
-                filter === item
-                  ? "bg-[#3F6B4F] text-white"
-                  : "bg-[#E7EFE6] text-[#3F6B4F]"
-              }`}
-            >
-              {item.charAt(0).toUpperCase() + item.slice(1)}
-            </button>
-          ))}
-        </div>
+        
 
-        <div className="mb-5 flex items-center justify-between">
-          <h2 className="font-serif text-2xl font-bold">Virtual fridge</h2>
+<div className="mb-5 flex items-center justify-between">
+  <h2 className="font-serif text-2xl font-bold">Virtual fridge</h2>
 
-          <div className="flex gap-2">
-            <Link
-              href="/history"
-              className="rounded-full bg-[#F1EDE2] px-4 py-2 font-bold text-[#2B2B26]"
-            >
-              History
-            </Link>
+  <div className="relative">
+  <button
+  type="button"
+  onClick={() => setFilterOpen((open) => !open)}
+  className="flex items-center gap-2 rounded-full border border-[#E7E2D6] bg-white px-5 py-2.5 text-sm font-bold text-[#3F6B4F] shadow-sm"
+>
+  <span>{filter.charAt(0).toUpperCase() + filter.slice(1)}</span>
 
-            <Link
-              href="/add"
-              className="flex items-center gap-1 rounded-full bg-[#E7EFE6] px-4 py-2 font-bold text-[#3F6B4F]"
-            >
-              <Plus size={18} /> Add
-            </Link>
-          </div>
-        </div>
+  <ChevronDown
+    size={18}
+    className={`transition-transform ${
+      filterOpen ? "rotate-180" : ""
+    }`}
+  />
+</button>
+
+  {filterOpen && (
+    <div className="absolute right-0 z-20 mt-2 w-40 overflow-hidden rounded-2xl border border-[#E7E2D6] bg-white shadow-lg">
+      {["all", "fridge", "freezer", "pantry", "expiring"].map((item) => (
+        <button
+          key={item}
+          type="button"
+          onClick={() => {
+            setFilter(item as typeof filter);
+            setFilterOpen(false);
+          }}
+          className={`flex w-full items-center justify-between px-4 py-3 text-left text-sm font-semibold ${
+            filter === item
+              ? "bg-[#E7EFE6] text-[#3F6B4F]"
+              : "text-[#2B2B26] hover:bg-[#FAF7F0]"
+          }`}
+        >
+          <span>{item.charAt(0).toUpperCase() + item.slice(1)}</span>
+          {filter === item && <span>✓</span>}
+        </button>
+      ))}
+    </div>
+  )}
+</div>
+</div>
 
         {filteredFoods.length === 0 ? (
           <div className="rounded-3xl border border-[#E7E2D6] bg-white p-8 text-center">
