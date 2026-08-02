@@ -183,11 +183,12 @@ type ShelfLifeItem = {
     const search = foodName.toLowerCase().trim();
   
     for (const [name, info] of Object.entries(shelfLife)) {
-      if (name === search) {
-        return info.days;
-      }
+      if (name === search) return info.days;
+      if (info.aliases.includes(search)) return info.days;
   
-      if (info.aliases.includes(search)) {
+      if (search.includes(name)) return info.days;
+  
+      if (info.aliases.some((alias) => search.includes(alias))) {
         return info.days;
       }
     }
