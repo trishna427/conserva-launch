@@ -42,10 +42,12 @@ export async function GET(request: Request) {
       .select("*")
       .eq("user_id", preference.user_id)
       .eq("used", false)
+      .eq("status", "active")
+      .gte("expiration_date", today)
       .or(`last_reminder_sent.is.null,last_reminder_sent.neq.${today}`)
       .order("expiration_date", { ascending: true });
 
-    if (!foods) continue;
+    if (!foods || foods.length === 0) continue;
 
     const summary = getKitchenSummary(foods, {
       in_app_reminders: true,
@@ -66,16 +68,28 @@ export async function GET(request: Request) {
         <div style="font-family: Arial, sans-serif; line-height: 1.6;">
           <h2>🌿 Your Conserva Kitchen Update</h2>
           <p>Good morning!</p>
-          <p>You have <strong>${summary.count}</strong> food${
+
+          <p>
+            You have <strong>${summary.count}</strong> food${
         summary.count === 1 ? "" : "s"
-      } that may be best used soon.</p>
-          <ul>${reminderList}</ul>
-          <p>Open Conserva to manage your kitchen and find recipe ideas.</p>
+      } that may be best used soon.
+          </p>
+
+          <ul>
+            ${reminderList}
+          </ul>
+
+          <p>
+            Open Conserva to manage your kitchen and find recipe ideas.
+          </p>
         </div>
       `,
     });
 
-    if (emailError) continue;
+    if (emailError) {
+      console.error("Reminder email failed:", emailError);
+      continue;
+    }
 
     const foodIds = foods.map((food) => food.id);
 

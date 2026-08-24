@@ -27,20 +27,24 @@ export default function RecipesPage() {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-
+  
     if (!user) return;
-
+  
+    const today = new Date().toISOString().slice(0, 10);
+  
     const { data, error } = await supabase
       .from("food_items")
       .select("name")
       .eq("user_id", user.id)
-      .eq("used", false);
-
+      .eq("used", false)
+      .eq("status", "active")
+      .gte("expiration_date", today);
+  
     if (error) {
       console.error(error);
       return;
     }
-
+  
     setFoods(data.map((food) => food.name));
   }
 

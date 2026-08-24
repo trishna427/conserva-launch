@@ -65,10 +65,11 @@ export default function DashboardPage() {
       }
 
       const { data: foodData, error } = await supabase
-        .from("food_items")
-        .select("*")
-        .eq("used", false)
-        .order("expiration_date", { ascending: true });
+      .from("food_items")
+      .select("*")
+      .eq("used", false)
+      .eq("status", "active")
+      .order("expiration_date", { ascending: true });
 
       if (error) {
         console.error(error.message);
@@ -103,6 +104,17 @@ export default function DashboardPage() {
     await supabase.from("food_items").update({ used: true }).eq("id", id);
     setFoods((current) => current.filter((food) => food.id !== id));
   }
+  async function markAsDisposed(id: string) {
+    await supabase
+      .from("food_items")
+      .update({
+        status: "disposed",
+        used: false,
+      })
+      .eq("id", id);
+  
+    setFoods((current) => current.filter((food) => food.id !== id));
+  }
 
   async function deleteFood(id: string, name: string) {
     const confirmDelete = confirm(`Delete ${name}?`);
@@ -127,12 +139,14 @@ export default function DashboardPage() {
     return food.location === filter;
   });
 
-  const activeItems = foods.length;
-
+  const activeItems = foods.filter(
+    (food) => getFoodStatus(food.expiration_date) === "fresh"
+  ).length;
+  
   const expiringItems = foods.filter(
     (food) => getFoodStatus(food.expiration_date) === "expiring-soon"
   ).length;
-
+  
   const expiredItems = foods.filter(
     (food) => getFoodStatus(food.expiration_date) === "expired"
   ).length;
@@ -386,6 +400,14 @@ export default function DashboardPage() {
                         >
                           Used
                         </button>
+                        {expired && (
+  <button
+    onClick={() => markAsDisposed(food.id)}
+    className="rounded-full bg-[#F7E3DF] px-4 py-2 text-sm font-bold text-[#A23B30]"
+  >
+    Disposed
+  </button>
+)}
 
                         <button
                           onClick={() => deleteFood(food.id, food.name)}
