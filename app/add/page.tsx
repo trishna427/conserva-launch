@@ -185,7 +185,12 @@ export default function AddItemPage() {
 
   return (
     <main className="flex min-h-screen justify-center bg-[#FAF7F0] text-[#2B2B26]">
-      <section className="min-h-screen w-full max-w-[430px] px-6 pb-28 pt-5">
+ <section
+  className="min-h-screen w-full max-w-[430px] px-6 pb-28"
+  style={{
+    paddingTop: "max(72px, calc(env(safe-area-inset-top) + 24px))",
+  }}
+>
         <Link
           href="/dashboard"
           className="mb-5 flex items-center gap-2 font-bold text-[#3F6B4F]"
