@@ -161,7 +161,12 @@ export default function DashboardPage() {
 
   return (
     <main className="flex min-h-screen justify-center bg-[#FAF7F0] text-[#2B2B26]">
-      <section className="min-h-screen w-full max-w-[430px] px-5 py-6 pb-28">
+  <section
+  className="min-h-screen w-full max-w-[430px] px-5 pb-28 pt-6"
+  style={{
+    paddingTop: "max(72px, calc(env(safe-area-inset-top) + 24px))",
+  }}
+>
         <header className="mb-6 flex items-center justify-between">
           <div>
             <p className="text-[#8A8578]">Welcome 🌿</p>
