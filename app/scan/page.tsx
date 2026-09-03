@@ -2,17 +2,29 @@
 
 import ReceiptItemCard from "@/components/ReceiptItemCard";
 import BottomNav from "@/components/BottomNav";
-import { getSuggestedShelfLife } from "@/lib/shelfLife";
 import { supabase } from "@/lib/supabase";
-import { Camera, Image as ImageIcon, Upload } from "lucide-react";
+import {
+  Camera,
+  Image as ImageIcon,
+  Upload,
+} from "lucide-react";
 import { useRef, useState } from "react";
+
+type StorageLocation = "fridge" | "freezer" | "pantry";
 
 type ScannedItem = {
   name: string;
   quantity: string;
-  location: "fridge" | "freezer" | "pantry";
+  location: StorageLocation;
   purchase_date: string;
   expiration_date: string;
+};
+
+type ReceiptApiItem = {
+  name: string;
+  quantity: string;
+  location: StorageLocation;
+  shelfLifeDays: number;
 };
 
 function todayISO() {
@@ -20,14 +32,9 @@ function todayISO() {
 }
 
 function addDays(date: string, days: number) {
-  const result = new Date(date);
+  const result = new Date(`${date}T12:00:00`);
   result.setDate(result.getDate() + days);
   return result.toISOString().slice(0, 10);
-}
-
-function suggestExpiration(name: string) {
-  const days = getSuggestedShelfLife(name);
-  return days ? addDays(todayISO(), days) : "";
 }
 
 export default function ScanPage() {
@@ -36,14 +43,24 @@ export default function ScanPage() {
 
   const [image, setImage] = useState<File | null>(null);
   const [preview, setPreview] = useState("");
+
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [items, setItems] = useState<ScannedItem[]>([]);
-  const [expandedItem, setExpandedItem] = useState<number | null>(null);
 
-  function handleImageUpload(event: React.ChangeEvent<HTMLInputElement>) {
+  const [items, setItems] = useState<ScannedItem[]>([]);
+  const [expandedItem, setExpandedItem] =
+    useState<number | null>(null);
+
+  function handleImageUpload(
+    event: React.ChangeEvent<HTMLInputElement>
+  ) {
     const file = event.target.files?.[0];
+
     if (!file) return;
+
+    if (preview) {
+      URL.revokeObjectURL(preview);
+    }
 
     setImage(file);
     setPreview(URL.createObjectURL(file));
@@ -70,51 +87,11 @@ export default function ScanPage() {
     }
   }
 
-  async function estimateShelfLife(food: string) {
-    try {
-      const response = await fetch("/api/estimate-shelf-life", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ food }),
-      });
-
-      const data = await response.json().catch(() => null);
-
-      if (!response.ok || !data) {
-        console.error(
-          `Shelf-life estimate failed for "${food}":`,
-          response.status,
-          data
-        );
-        return null;
-      }
-
-      const days = Number(data.days);
-
-      if (
-        !Number.isFinite(days) ||
-        !["fridge", "freezer", "pantry"].includes(data.location)
-      ) {
-        console.error("Invalid shelf-life response:", data);
-        return null;
-      }
-
-      return {
-        days,
-        location: data.location as "fridge" | "freezer" | "pantry",
-      };
-    } catch (error) {
-      console.error("Shelf-life estimate failed:", error);
-      return null;
-    }
-  }
-
   async function scanReceipt() {
-    if (!image) return;
+    if (!image || loading) return;
 
     setLoading(true);
+    setItems([]);
 
     try {
       const formData = new FormData();
@@ -125,46 +102,50 @@ export default function ScanPage() {
         body: formData,
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
 
-      if (!response.ok) {
-        alert(data?.error || "Could not scan receipt.");
-        setLoading(false);
+      if (!response.ok || !data) {
+        console.error("Receipt scan failed:", data);
+
+        alert(
+          data?.error ||
+            "We couldn't scan this receipt. Please try again."
+        );
+
         return;
       }
 
-      const scannedItems: ScannedItem[] = [];
+      const receiptItems: ReceiptApiItem[] =
+        Array.isArray(data.items) ? data.items : [];
 
-      for (const item of data.items || []) {
-        const name = item.name || item;
-
-        const localExpiration = suggestExpiration(name);
-        const aiEstimate = await estimateShelfLife(name);
-
-        let expiration = localExpiration;
-        let location: "fridge" | "freezer" | "pantry" = "fridge";
-
-        if (!expiration && aiEstimate) {
-          expiration = addDays(todayISO(), aiEstimate.days);
-        }
-
-        if (aiEstimate) {
-          location = aiEstimate.location;
-        }
-
-        scannedItems.push({
-          name,
-          quantity: item.quantity || "",
-          location,
-          purchase_date: todayISO(),
-          expiration_date: expiration,
-        });
+      if (receiptItems.length === 0) {
+        alert(
+          "We couldn't find any grocery items on this receipt."
+        );
+        return;
       }
+
+      const purchaseDate = todayISO();
+
+      const scannedItems: ScannedItem[] =
+        receiptItems.map((item) => ({
+          name: item.name,
+          quantity: item.quantity || "",
+          location: item.location,
+          purchase_date: purchaseDate,
+          expiration_date: addDays(
+            purchaseDate,
+            item.shelfLifeDays
+          ),
+        }));
 
       setItems(scannedItems);
     } catch (error) {
       console.error("Receipt scan failed:", error);
-      alert("Something went wrong while scanning the receipt.");
+
+      alert(
+        "Something went wrong while scanning the receipt."
+      );
     } finally {
       setLoading(false);
     }
@@ -177,63 +158,84 @@ export default function ScanPage() {
   ) {
     setItems((current) =>
       current.map((item, i) =>
-        i === index ? { ...item, [field]: value } : item
+        i === index
+          ? { ...item, [field]: value }
+          : item
       )
     );
   }
 
   function removeItem(index: number) {
-    setItems((current) => current.filter((_, i) => i !== index));
+    setItems((current) =>
+      current.filter((_, i) => i !== index)
+    );
 
     if (expandedItem === index) {
       setExpandedItem(null);
+    } else if (
+      expandedItem !== null &&
+      expandedItem > index
+    ) {
+      setExpandedItem(expandedItem - 1);
     }
   }
 
   async function saveAllToKitchen() {
+    if (items.length === 0 || saving) return;
+
     setSaving(true);
 
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-    if (!session) {
+      if (!session) {
+        alert("Please log in again.");
+        return;
+      }
+
+      const rows = items
+        .filter(
+          (item) =>
+            item.name.trim() &&
+            item.expiration_date
+        )
+        .map((item) => ({
+          user_id: session.user.id,
+          name: item.name.trim(),
+          quantity: item.quantity.trim(),
+          location: item.location,
+          purchase_date: item.purchase_date,
+          expiration_date: item.expiration_date,
+          notes: "Added from receipt scan",
+          used: false,
+          status: "active",
+        }));
+
+      if (rows.length === 0) {
+        alert("There are no valid items to save.");
+        return;
+      }
+
+      const { error } = await supabase
+        .from("food_items")
+        .insert(rows);
+
+      if (error) {
+        alert(error.message);
+        return;
+      }
+
+      alert("Items added to your kitchen!");
+
+      removeImage();
+    } catch (error) {
+      console.error("Saving receipt items failed:", error);
+      alert("Something went wrong while saving.");
+    } finally {
       setSaving(false);
-      return;
     }
-
-    const rows = items
-      .filter((item) => item.name.trim() && item.expiration_date)
-      .map((item) => ({
-        user_id: session.user.id,
-        name: item.name,
-        quantity: item.quantity,
-        location: item.location,
-        purchase_date: item.purchase_date,
-        expiration_date: item.expiration_date,
-        notes: "Added from receipt scan",
-        used: false,
-        status: "active",
-      }));
-
-    if (rows.length === 0) {
-      alert("No valid items to save.");
-      setSaving(false);
-      return;
-    }
-
-    const { error } = await supabase.from("food_items").insert(rows);
-
-    setSaving(false);
-
-    if (error) {
-      alert(error.message);
-      return;
-    }
-
-    alert("Items added to your kitchen!");
-
-    removeImage();
   }
 
   return (
@@ -241,7 +243,8 @@ export default function ScanPage() {
       <section
         className="min-h-screen w-full max-w-[430px] px-6 pb-28"
         style={{
-          paddingTop: "max(72px, calc(env(safe-area-inset-top) + 24px))",
+          paddingTop:
+            "max(72px, calc(env(safe-area-inset-top) + 24px))",
         }}
       >
         <div className="text-center">
@@ -254,14 +257,17 @@ export default function ScanPage() {
           </h1>
 
           <p className="mt-3 text-[#8A8578]">
-            Take a photo or choose a receipt from your library.
+            Take a photo or choose a receipt from your
+            library.
           </p>
         </div>
 
         <div className="mt-10 grid grid-cols-2 gap-3">
           <button
             type="button"
-            onClick={() => cameraInputRef.current?.click()}
+            onClick={() =>
+              cameraInputRef.current?.click()
+            }
             className="flex flex-col items-center justify-center rounded-3xl border border-[#E7E2D6] bg-white p-5 text-center shadow-sm"
           >
             <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#E7EFE6] text-[#3F6B4F]">
@@ -279,7 +285,9 @@ export default function ScanPage() {
 
           <button
             type="button"
-            onClick={() => libraryInputRef.current?.click()}
+            onClick={() =>
+              libraryInputRef.current?.click()
+            }
             className="flex flex-col items-center justify-center rounded-3xl border border-[#E7E2D6] bg-white p-5 text-center shadow-sm"
           >
             <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#E7EFE6] text-[#3F6B4F]">
@@ -339,32 +347,44 @@ export default function ScanPage() {
             disabled={loading}
             className="mt-6 w-full rounded-3xl bg-[#3F6B4F] py-5 text-lg font-bold text-white disabled:opacity-60"
           >
-            {loading ? "Scanning..." : "Scan Receipt"}
+            {loading
+              ? "Scanning receipt..."
+              : "Scan Receipt"}
           </button>
         )}
 
         {!image && (
           <div className="mt-6 flex items-center justify-center gap-2 rounded-2xl bg-[#E7EFE6] px-4 py-3 text-sm text-[#3F6B4F]">
             <Upload size={16} />
-            <span>Select a receipt image to begin.</span>
+            <span>
+              Select a receipt image to begin.
+            </span>
           </div>
         )}
 
         {items.length > 0 && (
           <div className="mt-8 space-y-4">
-            <h2 className="font-serif text-2xl font-bold">
-              Review items
-            </h2>
+            <div>
+              <h2 className="font-serif text-2xl font-bold">
+                Review items
+              </h2>
+
+              <p className="mt-1 text-sm text-[#8A8578]">
+                Check the AI suggestions before saving.
+              </p>
+            </div>
 
             {items.map((item, index) => (
               <ReceiptItemCard
-                key={index}
+                key={`${item.name}-${index}`}
                 item={item}
                 index={index}
                 expanded={expandedItem === index}
                 onToggle={() =>
                   setExpandedItem(
-                    expandedItem === index ? null : index
+                    expandedItem === index
+                      ? null
+                      : index
                   )
                 }
                 onUpdate={updateItem}
@@ -378,7 +398,9 @@ export default function ScanPage() {
               disabled={saving}
               className="w-full rounded-3xl bg-[#3F6B4F] py-5 text-lg font-bold text-white disabled:opacity-60"
             >
-              {saving ? "Saving..." : "Save all to kitchen"}
+              {saving
+                ? "Saving..."
+                : "Save all to kitchen"}
             </button>
           </div>
         )}
