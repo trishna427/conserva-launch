@@ -118,7 +118,12 @@ export default function AnalyticsPage() {
 
   return (
     <main className="flex min-h-screen justify-center bg-[#FAF7F0] text-[#2B2B26]">
-      <section className="min-h-screen w-full max-w-[430px] px-6 py-8 pb-28">
+<section
+  className="min-h-screen w-full max-w-[430px] px-6 pb-28"
+  style={{
+    paddingTop: "max(72px, calc(env(safe-area-inset-top) + 24px))",
+  }}
+>
         <h1 className="font-serif text-4xl font-bold">Analytics</h1>
 
         <p className="mt-2 text-[#8A8578]">
