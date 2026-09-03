@@ -16,7 +16,7 @@ function fileToGenerativePart(buffer: Buffer, mimeType: string) {
   return {
     inlineData: {
       data: buffer.toString("base64"),
-      mimeType,
+      mimeType: mimeType || "image/jpeg",
     },
   };
 }
@@ -27,6 +27,13 @@ function isStorageLocation(value: unknown): value is StorageLocation {
     value === "freezer" ||
     value === "pantry"
   );
+}
+
+function cleanJson(text: string) {
+  return text
+    .replace(/```json/gi, "")
+    .replace(/```/g, "")
+    .trim();
 }
 
 export async function POST(request: Request) {
@@ -42,6 +49,14 @@ export async function POST(request: Request) {
     }
 
     const bytes = await file.arrayBuffer();
+
+    if (!bytes.byteLength) {
+      return NextResponse.json(
+        { error: "Receipt image was empty." },
+        { status: 400 }
+      );
+    }
+
     const buffer = Buffer.from(bytes);
 
     const model = genAI.getGenerativeModel({
@@ -54,54 +69,61 @@ export async function POST(request: Request) {
     const prompt = `
 You are analyzing a grocery receipt for a food-waste tracking app.
 
-Read the receipt and identify ONLY grocery food items.
+Read the receipt image and extract ONLY grocery food items.
 
-For every food item, determine:
+For every detected food item return:
 
-1. name
-   - Use a simple, human-readable food name.
-   - Convert receipt abbreviations into normal names when reasonably clear.
+- name
+  A simple human-readable food name.
+  Convert obvious receipt abbreviations into normal food names.
 
-2. quantity
-   - Use the quantity shown on the receipt when available.
-   - If no quantity is visible, return an empty string.
+- quantity
+  The quantity if visible.
+  If no quantity is visible, use an empty string.
 
-3. location
-   - Determine the normal household storage location for a newly purchased item.
-   - Must be exactly one of:
-     "fridge"
-     "freezer"
-     "pantry"
+- location
+  The normal household storage location for a newly purchased item.
+  It MUST be exactly:
+  "fridge"
+  "freezer"
+  or
+  "pantry"
 
-4. shelfLifeDays
-   - Estimate how many days the item typically lasts when stored in that location.
-   - Return a positive whole number.
+- shelfLifeDays
+  The estimated number of days the food normally lasts in that storage location.
+  This MUST be a positive whole number.
 
-Important rules:
-
-- Return ONLY valid JSON.
-- Do not return markdown.
-- Do not return explanations.
+Important:
 - Ignore prices.
 - Ignore totals.
-- Ignore taxes.
+- Ignore tax.
 - Ignore discounts.
-- Ignore store names.
 - Ignore payment information.
+- Ignore store names.
+- Ignore loyalty information.
 - Ignore non-food products.
-- Do not invent food items that are not visible on the receipt.
+- Do not invent items not shown on the receipt.
+- Return ONLY JSON.
 
-Examples of storage:
-- milk -> fridge
-- fresh chicken -> fridge
-- apples -> fridge
-- dry rice -> pantry
-- cookies -> pantry
-- canned beans -> pantry
-- frozen peas -> freezer
-- ice cream -> freezer
+Examples:
 
-Return exactly this structure:
+Milk:
+location = "fridge"
+shelfLifeDays = 7
+
+Dry rice:
+location = "pantry"
+shelfLifeDays = 365
+
+Frozen peas:
+location = "freezer"
+shelfLifeDays = 180
+
+Cookies:
+location = "pantry"
+shelfLifeDays = 14
+
+Return exactly this shape:
 
 {
   "items": [
@@ -117,59 +139,123 @@ Return exactly this structure:
 
     const result = await model.generateContent([
       prompt,
-      fileToGenerativePart(buffer, file.type),
+      fileToGenerativePart(
+        buffer,
+        file.type || "image/jpeg"
+      ),
     ]);
 
-    const text = result.response.text().trim();
-    const parsed = JSON.parse(text);
+    const rawText = result.response.text();
 
-    if (!parsed || !Array.isArray(parsed.items)) {
+    console.log("Raw receipt AI response:", rawText);
+
+    const cleaned = cleanJson(rawText);
+
+    let parsed;
+
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (parseError) {
+      console.error(
+        "Could not parse receipt JSON:",
+        parseError,
+        cleaned
+      );
+
       return NextResponse.json(
-        { error: "Invalid receipt scan response." },
+        { error: "AI returned an unreadable receipt response." },
         { status: 502 }
       );
     }
 
-    const items: ReceiptItem[] = parsed.items
-      .map((item: any) => {
-        const name =
-          typeof item.name === "string" ? item.name.trim() : "";
+    if (!parsed || !Array.isArray(parsed.items)) {
+      console.error("Invalid receipt structure:", parsed);
 
-        const quantity =
-          typeof item.quantity === "string"
-            ? item.quantity.trim()
-            : "";
+      return NextResponse.json(
+        { error: "AI could not identify grocery items." },
+        { status: 502 }
+      );
+    }
 
-        const location = item.location;
+    const items: ReceiptItem[] = [];
 
-        const shelfLifeDays = Math.round(
-          Number(item.shelfLifeDays)
+    for (const item of parsed.items) {
+      const name =
+        typeof item?.name === "string"
+          ? item.name.trim()
+          : "";
+
+      let quantity = "";
+
+      if (typeof item?.quantity === "string") {
+        quantity = item.quantity.trim();
+      } else if (
+        typeof item?.quantity === "number"
+      ) {
+        quantity = String(item.quantity);
+      }
+
+      const rawLocation =
+        typeof item?.location === "string"
+          ? item.location.toLowerCase().trim()
+          : "";
+
+      const shelfLifeDays = Math.round(
+        Number(item?.shelfLifeDays)
+      );
+
+      if (!name) {
+        continue;
+      }
+
+      if (!isStorageLocation(rawLocation)) {
+        console.warn(
+          `Skipping "${name}" because storage was invalid:`,
+          rawLocation
         );
+        continue;
+      }
 
-        if (
-          !name ||
-          !isStorageLocation(location) ||
-          !Number.isFinite(shelfLifeDays) ||
-          shelfLifeDays <= 0
-        ) {
-          return null;
-        }
+      if (
+        !Number.isFinite(shelfLifeDays) ||
+        shelfLifeDays <= 0
+      ) {
+        console.warn(
+          `Skipping "${name}" because shelf life was invalid:`,
+          item?.shelfLifeDays
+        );
+        continue;
+      }
 
-        return {
-          name,
-          quantity,
-          location,
-          shelfLifeDays,
-        };
-      })
-      .filter((item: ReceiptItem | null): item is ReceiptItem => item !== null);
+      items.push({
+        name,
+        quantity,
+        location: rawLocation,
+        shelfLifeDays,
+      });
+    }
+
+    if (items.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            "No usable grocery items were found on the receipt.",
+        },
+        { status: 422 }
+      );
+    }
 
     return NextResponse.json({ items });
   } catch (error) {
     console.error("Receipt scan failed:", error);
 
     return NextResponse.json(
-      { error: "Failed to scan receipt." },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to scan receipt.",
+      },
       { status: 500 }
     );
   }
