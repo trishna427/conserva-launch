@@ -74,7 +74,12 @@ export default function RecipesPage() {
 
   return (
     <main className="flex min-h-screen justify-center bg-[#FAF7F0] text-[#2B2B26]">
-      <section className="min-h-screen w-full max-w-[430px] px-6 py-8 pb-28">
+<section
+  className="min-h-screen w-full max-w-[430px] px-6 pb-28"
+  style={{
+    paddingTop: "max(72px, calc(env(safe-area-inset-top) + 24px))",
+  }}
+>
         <div className="mb-8 text-center">
           <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#3F6B4F] text-white">
             <ChefHat size={28} />
