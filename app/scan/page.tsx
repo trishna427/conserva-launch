@@ -4,8 +4,8 @@ import ReceiptItemCard from "@/components/ReceiptItemCard";
 import BottomNav from "@/components/BottomNav";
 import { getSuggestedShelfLife } from "@/lib/shelfLife";
 import { supabase } from "@/lib/supabase";
-import { Camera, Upload } from "lucide-react";
-import { useState } from "react";
+import { Camera, Image as ImageIcon, Upload } from "lucide-react";
+import { useRef, useState } from "react";
 
 type ScannedItem = {
   name: string;
@@ -31,6 +31,9 @@ function suggestExpiration(name: string) {
 }
 
 export default function ScanPage() {
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const libraryInputRef = useRef<HTMLInputElement | null>(null);
+
   const [image, setImage] = useState<File | null>(null);
   const [preview, setPreview] = useState("");
   const [loading, setLoading] = useState(false);
@@ -49,50 +52,63 @@ export default function ScanPage() {
   }
 
   function removeImage() {
+    if (preview) {
+      URL.revokeObjectURL(preview);
+    }
+
     setImage(null);
     setPreview("");
     setItems([]);
     setExpandedItem(null);
+
+    if (cameraInputRef.current) {
+      cameraInputRef.current.value = "";
+    }
+
+    if (libraryInputRef.current) {
+      libraryInputRef.current.value = "";
+    }
   }
 
   async function estimateShelfLife(food: string) {
-    const response = await fetch("/api/estimate-shelf-life", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ food }),
-    });
-  
-    const data = await response.json().catch(() => null);
-  
-    if (!response.ok || !data) {
-      console.error(
-        `Shelf-life estimate failed for "${food}":`,
-        response.status,
-        data
-      );
-  
+    try {
+      const response = await fetch("/api/estimate-shelf-life", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ food }),
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok || !data) {
+        console.error(
+          `Shelf-life estimate failed for "${food}":`,
+          response.status,
+          data
+        );
+        return null;
+      }
+
+      const days = Number(data.days);
+
+      if (
+        !Number.isFinite(days) ||
+        !["fridge", "freezer", "pantry"].includes(data.location)
+      ) {
+        console.error("Invalid shelf-life response:", data);
+        return null;
+      }
+
+      return {
+        days,
+        location: data.location as "fridge" | "freezer" | "pantry",
+      };
+    } catch (error) {
+      console.error("Shelf-life estimate failed:", error);
       return null;
     }
-  
-    const days = Number(data.days);
-  
-    if (
-      !Number.isFinite(days) ||
-      !["fridge", "freezer", "pantry"].includes(data.location)
-    ) {
-      console.error("Invalid shelf-life response:", data);
-      return null;
-    }
-  
-    return {
-      days,
-      location: data.location as
-        | "fridge"
-        | "freezer"
-        | "pantry",
-    };
   }
 
   async function scanReceipt() {
@@ -100,49 +116,65 @@ export default function ScanPage() {
 
     setLoading(true);
 
-    const formData = new FormData();
-    formData.append("receipt", image);
+    try {
+      const formData = new FormData();
+      formData.append("receipt", image);
 
-    const response = await fetch("/api/scan-receipt", {
-      method: "POST",
-      body: formData,
-    });
-
-    const data = await response.json();
-
-    const scannedItems: ScannedItem[] = [];
-
-    for (const item of data.items || []) {
-      const name = item.name || item;
-    
-      const localExpiration = suggestExpiration(name);
-      const aiEstimate = await estimateShelfLife(name);
-    
-      let expiration = localExpiration;
-      let location: "fridge" | "freezer" | "pantry" = "fridge";
-    
-      if (!expiration && aiEstimate) {
-        expiration = addDays(todayISO(), aiEstimate.days);
-      }
-    
-      if (aiEstimate) {
-        location = aiEstimate.location;
-      }
-    
-      scannedItems.push({
-        name,
-        quantity: item.quantity || "",
-        location,
-        purchase_date: todayISO(),
-        expiration_date: expiration,
+      const response = await fetch("/api/scan-receipt", {
+        method: "POST",
+        body: formData,
       });
-    }
 
-    setItems(scannedItems);
-    setLoading(false);
+      const data = await response.json();
+
+      if (!response.ok) {
+        alert(data?.error || "Could not scan receipt.");
+        setLoading(false);
+        return;
+      }
+
+      const scannedItems: ScannedItem[] = [];
+
+      for (const item of data.items || []) {
+        const name = item.name || item;
+
+        const localExpiration = suggestExpiration(name);
+        const aiEstimate = await estimateShelfLife(name);
+
+        let expiration = localExpiration;
+        let location: "fridge" | "freezer" | "pantry" = "fridge";
+
+        if (!expiration && aiEstimate) {
+          expiration = addDays(todayISO(), aiEstimate.days);
+        }
+
+        if (aiEstimate) {
+          location = aiEstimate.location;
+        }
+
+        scannedItems.push({
+          name,
+          quantity: item.quantity || "",
+          location,
+          purchase_date: todayISO(),
+          expiration_date: expiration,
+        });
+      }
+
+      setItems(scannedItems);
+    } catch (error) {
+      console.error("Receipt scan failed:", error);
+      alert("Something went wrong while scanning the receipt.");
+    } finally {
+      setLoading(false);
+    }
   }
 
-  function updateItem(index: number, field: keyof ScannedItem, value: string) {
+  function updateItem(
+    index: number,
+    field: keyof ScannedItem,
+    value: string
+  ) {
     setItems((current) =>
       current.map((item, i) =>
         i === index ? { ...item, [field]: value } : item
@@ -181,7 +213,14 @@ export default function ScanPage() {
         expiration_date: item.expiration_date,
         notes: "Added from receipt scan",
         used: false,
+        status: "active",
       }));
+
+    if (rows.length === 0) {
+      alert("No valid items to save.");
+      setSaving(false);
+      return;
+    }
 
     const { error } = await supabase.from("food_items").insert(rows);
 
@@ -193,41 +232,86 @@ export default function ScanPage() {
     }
 
     alert("Items added to your kitchen!");
-    setItems([]);
-    setImage(null);
-    setPreview("");
-    setExpandedItem(null);
+
+    removeImage();
   }
 
   return (
     <main className="flex min-h-screen justify-center bg-[#FAF7F0] text-[#2B2B26]">
-      <section className="min-h-screen w-full max-w-[430px] px-6 py-8 pb-28">
+      <section
+        className="min-h-screen w-full max-w-[430px] px-6 pb-28"
+        style={{
+          paddingTop: "max(72px, calc(env(safe-area-inset-top) + 24px))",
+        }}
+      >
         <div className="text-center">
           <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#3F6B4F] text-white">
             <Camera size={28} />
           </div>
 
-          <h1 className="font-serif text-4xl font-bold">Scan receipt</h1>
+          <h1 className="font-serif text-4xl font-bold">
+            Scan receipt
+          </h1>
+
           <p className="mt-3 text-[#8A8578]">
-            Upload a receipt and review the foods before adding them.
+            Take a photo or choose a receipt from your library.
           </p>
         </div>
 
-        <label className="mt-10 flex cursor-pointer flex-col items-center justify-center rounded-3xl border border-dashed border-[#CFC8BA] bg-white p-8 text-center">
-          <Upload className="mb-3 text-[#3F6B4F]" />
-          <p className="font-bold text-[#3F6B4F]">Choose receipt image</p>
-          <p className="mt-2 text-sm text-[#8A8578]">
-            Take a photo or upload one from your device.
-          </p>
+        <div className="mt-10 grid grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={() => cameraInputRef.current?.click()}
+            className="flex flex-col items-center justify-center rounded-3xl border border-[#E7E2D6] bg-white p-5 text-center shadow-sm"
+          >
+            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#E7EFE6] text-[#3F6B4F]">
+              <Camera size={24} />
+            </div>
 
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={handleImageUpload}
-          />
-        </label>
+            <p className="font-bold text-[#3F6B4F]">
+              Take photo
+            </p>
+
+            <p className="mt-1 text-xs text-[#8A8578]">
+              Use your camera
+            </p>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => libraryInputRef.current?.click()}
+            className="flex flex-col items-center justify-center rounded-3xl border border-[#E7E2D6] bg-white p-5 text-center shadow-sm"
+          >
+            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#E7EFE6] text-[#3F6B4F]">
+              <ImageIcon size={24} />
+            </div>
+
+            <p className="font-bold text-[#3F6B4F]">
+              Choose photo
+            </p>
+
+            <p className="mt-1 text-xs text-[#8A8578]">
+              Pick from library
+            </p>
+          </button>
+        </div>
+
+        <input
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={handleImageUpload}
+        />
+
+        <input
+          ref={libraryInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleImageUpload}
+        />
 
         {preview && (
           <div className="relative mt-6 overflow-hidden rounded-3xl border border-[#E7E2D6] bg-white">
@@ -240,21 +324,37 @@ export default function ScanPage() {
               ×
             </button>
 
-            <img src={preview} alt="Receipt preview" className="w-full" />
+            <img
+              src={preview}
+              alt="Receipt preview"
+              className="w-full"
+            />
           </div>
         )}
 
-        <button
-          onClick={scanReceipt}
-          disabled={!image || loading}
-          className="mt-6 w-full rounded-3xl bg-[#3F6B4F] py-5 text-lg font-bold text-white disabled:opacity-60"
-        >
-          {loading ? "Scanning..." : "Scan Receipt"}
-        </button>
+        {image && (
+          <button
+            type="button"
+            onClick={scanReceipt}
+            disabled={loading}
+            className="mt-6 w-full rounded-3xl bg-[#3F6B4F] py-5 text-lg font-bold text-white disabled:opacity-60"
+          >
+            {loading ? "Scanning..." : "Scan Receipt"}
+          </button>
+        )}
+
+        {!image && (
+          <div className="mt-6 flex items-center justify-center gap-2 rounded-2xl bg-[#E7EFE6] px-4 py-3 text-sm text-[#3F6B4F]">
+            <Upload size={16} />
+            <span>Select a receipt image to begin.</span>
+          </div>
+        )}
 
         {items.length > 0 && (
           <div className="mt-8 space-y-4">
-            <h2 className="font-serif text-2xl font-bold">Review items</h2>
+            <h2 className="font-serif text-2xl font-bold">
+              Review items
+            </h2>
 
             {items.map((item, index) => (
               <ReceiptItemCard
@@ -263,7 +363,9 @@ export default function ScanPage() {
                 index={index}
                 expanded={expandedItem === index}
                 onToggle={() =>
-                  setExpandedItem(expandedItem === index ? null : index)
+                  setExpandedItem(
+                    expandedItem === index ? null : index
+                  )
                 }
                 onUpdate={updateItem}
                 onRemove={removeItem}
@@ -271,6 +373,7 @@ export default function ScanPage() {
             ))}
 
             <button
+              type="button"
               onClick={saveAllToKitchen}
               disabled={saving}
               className="w-full rounded-3xl bg-[#3F6B4F] py-5 text-lg font-bold text-white disabled:opacity-60"
