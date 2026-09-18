@@ -19,8 +19,10 @@ import { useState } from "react";
 type StorageLocation = "fridge" | "freezer" | "pantry";
 
 type ShelfLifeEstimate = {
-  days: number;
-  location: StorageLocation;
+  isFood: boolean;
+  days?: number;
+  location?: StorageLocation;
+  error?: string;
 };
 
 function todayISO() {
@@ -56,6 +58,9 @@ export default function AddItemPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
+  const [validatedFoodName, setValidatedFoodName] = useState("");
+  const [isValidFood, setIsValidFood] = useState<boolean | null>(null);
+
   async function estimateShelfLife(
     food: string
   ): Promise<ShelfLifeEstimate | null> {
@@ -70,8 +75,26 @@ export default function AddItemPage() {
 
       const data = await response.json().catch(() => null);
 
-      if (!response.ok || !data) {
-        console.error("Shelf-life request failed:", response.status, data);
+      if (!data) {
+        console.error("Shelf-life request returned no data.");
+        return null;
+      }
+
+      if (data.isFood === false) {
+        return {
+          isFood: false,
+          error:
+            data.error ||
+            "That doesn't look like a food or drink.",
+        };
+      }
+
+      if (!response.ok) {
+        console.error(
+          "Shelf-life request failed:",
+          response.status,
+          data
+        );
         return null;
       }
 
@@ -83,12 +106,18 @@ export default function AddItemPage() {
         returnedLocation === "freezer" ||
         returnedLocation === "pantry";
 
-      if (!Number.isFinite(days) || days <= 0 || !validLocation) {
+      if (
+        data.isFood !== true ||
+        !Number.isFinite(days) ||
+        days <= 0 ||
+        !validLocation
+      ) {
         console.error("Invalid shelf-life response:", data);
         return null;
       }
 
       return {
+        isFood: true,
         days,
         location: returnedLocation,
       };
@@ -106,39 +135,69 @@ export default function AddItemPage() {
 
     if (!cleanedName || !date) {
       setSuggestionMessage("");
+      setIsValidFood(null);
+      setValidatedFoodName("");
       return;
     }
 
     setEstimating(true);
-    setSuggestionMessage("Estimating shelf life and storage...");
+    setSuggestionMessage("Checking food and estimating details...");
 
-    const localDays = getSuggestedShelfLife(cleanedName);
     const aiEstimate = await estimateShelfLife(cleanedName);
 
-    // Prefer the local database for shelf life when available.
-    // Otherwise use the AI estimate.
-    const days = localDays ?? aiEstimate?.days ?? null;
+    if (aiEstimate?.isFood === false) {
+      setIsValidFood(false);
+      setValidatedFoodName(cleanedName.toLowerCase());
+      setExpirationDate("");
+
+      setSuggestionMessage(
+        aiEstimate.error ||
+          "That doesn't look like a food or drink."
+      );
+
+      setEstimating(false);
+      return;
+    }
+
+    if (!aiEstimate) {
+      setIsValidFood(null);
+      setValidatedFoodName("");
+
+      setSuggestionMessage(
+        "We couldn't verify this food automatically. Please try again."
+      );
+
+      setEstimating(false);
+      return;
+    }
+
+    setIsValidFood(true);
+    setValidatedFoodName(cleanedName.toLowerCase());
+
+    const localDays = getSuggestedShelfLife(cleanedName);
+
+    const days =
+      localDays ??
+      (aiEstimate.days !== undefined ? aiEstimate.days : null);
 
     if (days !== null) {
       setExpirationDate(addDays(date, days));
     }
 
-    // AI determines storage for both known and unknown foods.
-    if (aiEstimate) {
+    if (aiEstimate.location) {
       setLocation(aiEstimate.location);
     }
 
-    if (days !== null && aiEstimate) {
+    if (
+      days !== null &&
+      aiEstimate.location
+    ) {
       setSuggestionMessage(
         `Suggested ${days} days in the ${aiEstimate.location}. You can change these details.`
       );
-    } else if (days !== null) {
-      setSuggestionMessage(
-        `Suggested ${days} days based on typical storage. Please confirm the storage location.`
-      );
     } else {
       setSuggestionMessage(
-        "We could not estimate this food automatically. Please enter the date and storage location."
+        "Food verified. Please enter the date and storage location."
       );
     }
 
@@ -149,8 +208,76 @@ export default function AddItemPage() {
     event: React.FormEvent<HTMLFormElement>
   ) {
     event.preventDefault();
+
+    const cleanedName = name.trim();
+
+    if (!cleanedName) {
+      setMessage("Enter a food name.");
+      return;
+    }
+
     setLoading(true);
     setMessage("");
+
+    /*
+      Make sure the exact current name has been validated.
+
+      This prevents someone from validating "apple", changing
+      the field to "pencil", and immediately pressing Add.
+    */
+    const currentNormalizedName = cleanedName.toLowerCase();
+
+    let foodIsValid =
+      isValidFood === true &&
+      validatedFoodName === currentNormalizedName;
+
+    if (!foodIsValid) {
+      const validation = await estimateShelfLife(cleanedName);
+
+      if (validation?.isFood === false) {
+        setIsValidFood(false);
+        setValidatedFoodName(currentNormalizedName);
+        setSuggestionMessage(
+          validation.error ||
+            "That doesn't look like a food or drink."
+        );
+        setMessage(
+          "That doesn't look like a food or drink."
+        );
+        setLoading(false);
+        return;
+      }
+
+      if (!validation || validation.isFood !== true) {
+        setMessage(
+          "We couldn't verify this item as food. Please try again."
+        );
+        setLoading(false);
+        return;
+      }
+
+      foodIsValid = true;
+      setIsValidFood(true);
+      setValidatedFoodName(currentNormalizedName);
+
+      if (validation.location) {
+        setLocation(validation.location);
+      }
+
+      if (!expirationDate && validation.days) {
+        setExpirationDate(
+          addDays(purchaseDate, validation.days)
+        );
+      }
+    }
+
+    if (!foodIsValid) {
+      setMessage(
+        "That doesn't look like a food or drink."
+      );
+      setLoading(false);
+      return;
+    }
 
     const {
       data: { session },
@@ -164,7 +291,7 @@ export default function AddItemPage() {
 
     const { error } = await supabase.from("food_items").insert({
       user_id: session.user.id,
-      name: name.trim(),
+      name: cleanedName,
       quantity: quantity.trim(),
       location,
       purchase_date: purchaseDate,
@@ -185,12 +312,13 @@ export default function AddItemPage() {
 
   return (
     <main className="flex min-h-screen justify-center bg-[#FAF7F0] text-[#2B2B26]">
- <section
-  className="min-h-screen w-full max-w-[430px] px-6 pb-28"
-  style={{
-    paddingTop: "max(72px, calc(env(safe-area-inset-top) + 24px))",
-  }}
->
+      <section
+        className="min-h-screen w-full max-w-[430px] px-6 pb-28"
+        style={{
+          paddingTop:
+            "max(72px, calc(env(safe-area-inset-top) + 24px))",
+        }}
+      >
         <Link
           href="/dashboard"
           className="mb-5 flex items-center gap-2 font-bold text-[#3F6B4F]"
@@ -225,6 +353,7 @@ export default function AddItemPage() {
             <h3 className="text-lg font-bold text-[#3F6B4F]">
               Scan a receipt
             </h3>
+
             <p className="mt-1 text-sm text-[#8A8578]">
               Add multiple groceries automatically.
             </p>
@@ -233,7 +362,10 @@ export default function AddItemPage() {
           <span className="text-2xl text-[#3F6B4F]">→</span>
         </Link>
 
-        <form onSubmit={handleAddItem} className="mt-8 space-y-7">
+        <form
+          onSubmit={handleAddItem}
+          className="mt-8 space-y-7"
+        >
           <section>
             <h2 className="mb-3 font-serif text-2xl font-bold">
               Food Information
@@ -247,9 +379,17 @@ export default function AddItemPage() {
                   value={name}
                   onChange={(event) => {
                     const value = event.target.value;
+
                     setName(value);
                     setFoodSuggestions(searchFoods(value));
                     setSuggestionMessage("");
+                    setMessage("");
+
+                    /*
+                      Any edit invalidates the previous validation.
+                    */
+                    setIsValidFood(null);
+                    setValidatedFoodName("");
                   }}
                   onBlur={() => {
                     window.setTimeout(() => {
@@ -266,10 +406,14 @@ export default function AddItemPage() {
                       <button
                         type="button"
                         key={suggestion}
-                        onMouseDown={(event) => event.preventDefault()}
+                        onMouseDown={(event) =>
+                          event.preventDefault()
+                        }
                         onClick={() => {
                           setName(suggestion);
                           setFoodSuggestions([]);
+                          setIsValidFood(null);
+                          setValidatedFoodName("");
                           void autofillFoodDetails(suggestion);
                         }}
                         className="block w-full px-4 py-3 text-left text-sm font-semibold hover:bg-[#E7EFE6]"
@@ -285,13 +429,15 @@ export default function AddItemPage() {
                 className="w-full rounded-2xl border border-[#E7E2D6] bg-white px-4 py-4 outline-none focus:border-[#3F6B4F]"
                 placeholder="Quantity, e.g. 2 cups"
                 value={quantity}
-                onChange={(event) => setQuantity(event.target.value)}
+                onChange={(event) =>
+                  setQuantity(event.target.value)
+                }
               />
             </div>
 
             {estimating && (
               <p className="mt-3 text-sm font-semibold text-[#3F6B4F]">
-                Estimating food details...
+                Checking food details...
               </p>
             )}
           </section>
@@ -304,13 +450,16 @@ export default function AddItemPage() {
             <div className="grid grid-cols-3 gap-3">
               {storageOptions.map((option) => {
                 const Icon = option.icon;
-                const selected = location === option.value;
+                const selected =
+                  location === option.value;
 
                 return (
                   <button
                     key={option.value}
                     type="button"
-                    onClick={() => setLocation(option.value)}
+                    onClick={() =>
+                      setLocation(option.value)
+                    }
                     className={`rounded-3xl border p-4 text-center transition ${
                       selected
                         ? "border-[#3F6B4F] bg-[#3F6B4F] text-white"
@@ -320,7 +469,10 @@ export default function AddItemPage() {
                     <div className="mb-2 flex justify-center">
                       <Icon size={24} />
                     </div>
-                    <p className="text-sm font-bold">{option.label}</p>
+
+                    <p className="text-sm font-bold">
+                      {option.label}
+                    </p>
                   </button>
                 );
               })}
@@ -337,16 +489,21 @@ export default function AddItemPage() {
                 <span className="mb-2 block font-semibold">
                   Purchase date
                 </span>
+
                 <input
                   className="w-full rounded-2xl border border-[#E7E2D6] bg-white px-4 py-4 outline-none focus:border-[#3F6B4F]"
                   type="date"
                   value={purchaseDate}
                   onChange={(event) => {
                     const value = event.target.value;
+
                     setPurchaseDate(value);
 
                     if (name.trim()) {
-                      void autofillFoodDetails(name, value);
+                      void autofillFoodDetails(
+                        name,
+                        value
+                      );
                     }
                   }}
                   required
@@ -357,12 +514,15 @@ export default function AddItemPage() {
                 <span className="mb-2 block font-semibold">
                   Estimated best-by date
                 </span>
+
                 <input
                   className="w-full rounded-2xl border border-[#E7E2D6] bg-white px-4 py-4 outline-none focus:border-[#3F6B4F]"
                   type="date"
                   value={expirationDate}
                   onChange={(event) =>
-                    setExpirationDate(event.target.value)
+                    setExpirationDate(
+                      event.target.value
+                    )
                   }
                   required
                 />
@@ -371,7 +531,10 @@ export default function AddItemPage() {
 
             {suggestionMessage && (
               <div className="mt-4 flex items-start gap-2 rounded-2xl bg-[#E7EFE6] px-4 py-3 text-sm text-[#3F6B4F]">
-                <Sparkles size={16} className="mt-0.5 shrink-0" />
+                <Sparkles
+                  size={16}
+                  className="mt-0.5 shrink-0"
+                />
                 <p>{suggestionMessage}</p>
               </div>
             )}
@@ -386,7 +549,9 @@ export default function AddItemPage() {
               className="min-h-28 w-full resize-none rounded-2xl border border-[#E7E2D6] bg-white px-4 py-4 outline-none focus:border-[#3F6B4F]"
               placeholder="Notes (optional)"
               value={notes}
-              onChange={(event) => setNotes(event.target.value)}
+              onChange={(event) =>
+                setNotes(event.target.value)
+              }
             />
           </section>
 

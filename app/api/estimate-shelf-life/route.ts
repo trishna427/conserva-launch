@@ -26,6 +26,7 @@ function isStorageLocation(value: unknown): value is StorageLocation {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+
     const food =
       typeof body.food === "string" ? body.food.trim() : "";
 
@@ -38,6 +39,12 @@ export async function POST(request: Request) {
 
     const normalizedFood = normalizeFoodName(food);
 
+    /*
+      First check whether this exact item is already in our
+      trusted shelf-life cache.
+
+      Anything in this cache was previously accepted as food.
+    */
     const { data: cached, error: cacheReadError } =
       await supabaseAdmin
         .from("shelf_life_cache")
@@ -52,15 +59,22 @@ export async function POST(request: Request) {
     if (
       cached &&
       Number.isFinite(Number(cached.days)) &&
+      Number(cached.days) > 0 &&
       isStorageLocation(cached.location)
     ) {
       return NextResponse.json({
+        isFood: true,
         days: Number(cached.days),
         location: cached.location,
         source: "cache",
       });
     }
 
+    /*
+      If it isn't cached, Gemini determines whether it is
+      actually something people eat or drink before estimating
+      shelf life.
+    */
     const model = genAI.getGenerativeModel({
       model: "gemini-2.5-flash",
       generationConfig: {
@@ -69,33 +83,86 @@ export async function POST(request: Request) {
     });
 
     const prompt = `
-Estimate the typical shelf life and normal household storage location
-for this grocery food:
+You are validating an item being added to a household food inventory app.
+
+Item entered by the user:
 
 "${food}"
 
-Return one JSON object containing:
-- "days": a positive whole number
-- "location": exactly "fridge", "freezer", or "pantry"
+First determine whether the item is a real food, beverage, edible ingredient,
+condiment, seasoning, or grocery item intended for human consumption.
 
-Choose the location where a newly purchased version would normally be stored.
+Examples that ARE food:
+- apple
+- milk
+- rice
+- cookies
+- coffee
+- olive oil
+- salt
+- protein powder
+- frozen peas
+- chicken breast
 
-Examples:
-- Dry rice: pantry
-- Cookies: pantry
-- Milk: fridge
-- Frozen peas: freezer
+Examples that are NOT food:
+- pencil
+- laptop
+- shoe
+- shampoo
+- plate
+- phone charger
+- paper towel
+- detergent
 
-Return only JSON:
+If the item is NOT food, return exactly this JSON structure:
+
 {
+  "isFood": false
+}
+
+If the item IS food, estimate its typical shelf life after purchase and
+the normal household storage location for a newly purchased version.
+
+Return:
+
+{
+  "isFood": true,
   "days": 7,
   "location": "fridge"
 }
+
+Rules:
+- "days" must be a positive whole number.
+- "location" must be exactly "fridge", "freezer", or "pantry".
+- Choose the location where a newly purchased version is normally stored.
+- Dry rice should normally be pantry.
+- Cookies should normally be pantry.
+- Milk should normally be fridge.
+- Frozen peas should normally be freezer.
+- Do not pretend a non-food object is food just because it could technically be placed in a refrigerator.
+
+Return JSON only.
 `;
 
     const result = await model.generateContent(prompt);
-    const parsed = JSON.parse(result.response.text().trim());
 
+    const parsed = JSON.parse(
+      result.response.text().trim()
+    );
+
+    /*
+      Non-food item
+    */
+    if (parsed.isFood !== true) {
+      return NextResponse.json({
+        isFood: false,
+        error: "That doesn't look like a food or drink.",
+      });
+    }
+
+    /*
+      Valid food item
+    */
     const days = Math.round(Number(parsed.days));
     const location = parsed.location;
 
@@ -107,11 +174,16 @@ Return only JSON:
       console.error("Invalid AI response:", parsed);
 
       return NextResponse.json(
-        { error: "Invalid shelf-life estimate." },
+        {
+          error: "Invalid shelf-life estimate.",
+        },
         { status: 502 }
       );
     }
 
+    /*
+      Only real foods make it into the cache.
+    */
     const { error: cacheWriteError } = await supabaseAdmin
       .from("shelf_life_cache")
       .upsert(
@@ -130,6 +202,7 @@ Return only JSON:
     }
 
     return NextResponse.json({
+      isFood: true,
       days,
       location,
       source: "ai",
@@ -138,7 +211,9 @@ Return only JSON:
     console.error("Shelf-life route failed:", error);
 
     return NextResponse.json(
-      { error: "Failed to estimate shelf life." },
+      {
+        error: "Failed to estimate shelf life.",
+      },
       { status: 500 }
     );
   }

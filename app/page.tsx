@@ -39,7 +39,7 @@ export default function Home() {
           </p>
           <p className="flex items-center gap-4">
             <CheckCircle2 className="text-[#3F6B4F]" />
-            Gentle reminders before food turns
+            Gentle reminders before food turns bad
           </p>
           <p className="flex items-center gap-4">
             <CheckCircle2 className="text-[#3F6B4F]" />
