@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -5,6 +6,8 @@ import { Bell, ChevronLeft, Moon, User } from "lucide-react";
 import Link from "next/link";
 import BottomNav from "@/components/BottomNav";
 import { supabase } from "@/lib/supabase";
+import { Capacitor } from "@capacitor/core";
+import { PushNotifications } from "@capacitor/push-notifications";
 
 type Preferences = {
   id: string;
@@ -20,13 +23,25 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  const [isNativeApp, setIsNativeApp] = useState(false);
+  const [registeringPush, setRegisteringPush] = useState(false);
+  const [pushMessage, setPushMessage] = useState("");
+
   useEffect(() => {
+    setIsNativeApp(
+      Capacitor.isNativePlatform() &&
+        Capacitor.getPlatform() === "ios"
+    );
+
     async function loadPreferences() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
 
-      if (!session) return;
+      if (!session) {
+        setLoading(false);
+        return;
+      }
 
       const { data } = await supabase
         .from("user_preferences")
@@ -55,7 +70,7 @@ export default function SettingsPage() {
       setLoading(false);
     }
 
-    loadPreferences();
+    void loadPreferences();
   }, []);
 
   async function updatePreferences(changes: Partial<Preferences>) {
@@ -83,6 +98,84 @@ export default function SettingsPage() {
     setSaving(false);
   }
 
+  async function enablePushNotifications() {
+    if (
+      !Capacitor.isNativePlatform() ||
+      Capacitor.getPlatform() !== "ios"
+    ) {
+      return;
+    }
+
+    setRegisteringPush(true);
+    setPushMessage("Requesting notification permission...");
+
+    let registrationListener:
+      | Awaited<ReturnType<typeof PushNotifications.addListener>>
+      | undefined;
+
+    let errorListener:
+      | Awaited<ReturnType<typeof PushNotifications.addListener>>
+      | undefined;
+
+    try {
+      const permission =
+        await PushNotifications.requestPermissions();
+
+      if (permission.receive !== "granted") {
+        setPushMessage(
+          "Notifications are not allowed. You can enable them in your iPhone Settings."
+        );
+        return;
+      }
+
+      registrationListener =
+        await PushNotifications.addListener(
+          "registration",
+          (token) => {
+            console.log(
+              "Apple push registration succeeded:",
+              token.value
+            );
+
+            setPushMessage(
+              "Push notifications enabled! Your iPhone registered successfully."
+            );
+
+            setRegisteringPush(false);
+          }
+        );
+
+      errorListener =
+        await PushNotifications.addListener(
+          "registrationError",
+          (error) => {
+            console.error(
+              "Apple push registration failed:",
+              error
+            );
+
+            setPushMessage(
+              "Could not register this iPhone for push notifications. Please try again."
+            );
+
+            setRegisteringPush(false);
+          }
+        );
+
+      setPushMessage("Registering your iPhone with Apple...");
+
+      await PushNotifications.register();
+    } catch (error) {
+      console.error("Push notification setup failed:", error);
+
+      setPushMessage(
+        "Something went wrong while enabling push notifications."
+      );
+    } finally {
+      setRegisteringPush(false);
+    }
+  }
+
   if (loading || !preferences) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#FAF7F0]">
@@ -94,11 +187,12 @@ export default function SettingsPage() {
   return (
     <main className="flex min-h-screen justify-center bg-[#FAF7F0] text-[#2B2B26]">
       <section
-  className="min-h-screen w-full max-w-[430px] px-6 pb-28"
-  style={{
-    paddingTop: "max(72px, calc(env(safe-area-inset-top) + 24px))",
-  }}
->
+        className="min-h-screen w-full max-w-[430px] px-6 pb-28"
+        style={{
+          paddingTop:
+            "max(72px, calc(env(safe-area-inset-top) + 24px))",
+        }}
+      >
         <Link
           href="/dashboard"
           className="mb-8 flex items-center gap-2 font-bold text-[#3F6B4F]"
@@ -107,12 +201,16 @@ export default function SettingsPage() {
           Back
         </Link>
 
-        <h1 className="mb-8 font-serif text-4xl font-bold">Settings</h1>
+        <h1 className="mb-8 font-serif text-4xl font-bold">
+          Settings
+        </h1>
 
         <div className="mb-6 rounded-3xl border border-[#E7E2D6] bg-white p-5">
           <div className="mb-4 flex items-center gap-3">
             <User className="text-[#3F6B4F]" />
-            <h2 className="font-serif text-2xl font-bold">Account</h2>
+            <h2 className="font-serif text-2xl font-bold">
+              Account
+            </h2>
           </div>
 
           <p className="text-[#8A8578]">
@@ -123,12 +221,16 @@ export default function SettingsPage() {
         <div className="mb-6 rounded-3xl border border-[#E7E2D6] bg-white p-5">
           <div className="mb-5 flex items-center gap-3">
             <Bell className="text-[#3F6B4F]" />
-            <h2 className="font-serif text-2xl font-bold">Reminders</h2>
+            <h2 className="font-serif text-2xl font-bold">
+              Reminders
+            </h2>
           </div>
 
           <div className="mb-5 flex items-center justify-between">
             <div>
-              <p className="font-semibold">In-App Reminders</p>
+              <p className="font-semibold">
+                In-App Reminders
+              </p>
               <p className="text-sm text-[#8A8578]">
                 Show reminders inside Conserva.
               </p>
@@ -139,7 +241,8 @@ export default function SettingsPage() {
               checked={preferences.in_app_reminders}
               onChange={() =>
                 updatePreferences({
-                  in_app_reminders: !preferences.in_app_reminders,
+                  in_app_reminders:
+                    !preferences.in_app_reminders,
                 })
               }
             />
@@ -147,7 +250,9 @@ export default function SettingsPage() {
 
           <div className="mb-5 flex items-center justify-between">
             <div>
-              <p className="font-semibold">Email Reminders</p>
+              <p className="font-semibold">
+                Email Reminders
+              </p>
               <p className="text-sm text-[#8A8578]">
                 Receive a daily kitchen update.
               </p>
@@ -158,14 +263,46 @@ export default function SettingsPage() {
               checked={preferences.email_reminders}
               onChange={() =>
                 updatePreferences({
-                  email_reminders: !preferences.email_reminders,
+                  email_reminders:
+                    !preferences.email_reminders,
                 })
               }
             />
           </div>
 
+          {isNativeApp && (
+            <div className="mb-5 border-t border-[#E7E2D6] pt-5">
+              <p className="font-semibold">
+                Push Notifications
+              </p>
+
+              <p className="mt-1 text-sm text-[#8A8578]">
+                Get expiration reminders on your iPhone.
+              </p>
+
+              <button
+                type="button"
+                onClick={enablePushNotifications}
+                disabled={registeringPush}
+                className="mt-3 rounded-2xl bg-[#3F6B4F] px-5 py-3 text-sm font-bold text-white disabled:opacity-60"
+              >
+                {registeringPush
+                  ? "Enabling..."
+                  : "Enable Push Notifications"}
+              </button>
+
+              {pushMessage && (
+                <p className="mt-3 text-sm text-[#3F6B4F]">
+                  {pushMessage}
+                </p>
+              )}
+            </div>
+          )}
+
           <div>
-            <p className="mb-2 font-semibold">Remind me</p>
+            <p className="mb-2 font-semibold">
+              Remind me
+            </p>
 
             <select
               value={preferences.days_before}
@@ -183,17 +320,23 @@ export default function SettingsPage() {
           </div>
 
           <p className="mt-4 text-sm text-[#8A8578]">
-            {saving ? "Saving..." : "Settings saved automatically."}
+            {saving
+              ? "Saving..."
+              : "Settings saved automatically."}
           </p>
         </div>
 
         <div className="rounded-3xl border border-[#E7E2D6] bg-white p-5">
           <div className="mb-4 flex items-center gap-3">
             <Moon className="text-[#3F6B4F]" />
-            <h2 className="font-serif text-2xl font-bold">Appearance</h2>
+            <h2 className="font-serif text-2xl font-bold">
+              Appearance
+            </h2>
           </div>
 
-          <p className="text-[#8A8578]">Dark mode coming soon.</p>
+          <p className="text-[#8A8578]">
+            Dark mode coming soon.
+          </p>
         </div>
       </section>
 
