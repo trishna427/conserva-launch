@@ -1,3 +1,4 @@
+
 import { daysUntilExpiration } from "./food";
 
 export type ReminderPreferences = {
@@ -11,6 +12,7 @@ export type ReminderFood = {
   expiration_date: string;
   used?: boolean;
   status?: "active" | "used" | "disposed";
+  last_reminder_sent?: string | null;
 };
 
 export function shouldShowReminder(
@@ -21,21 +23,31 @@ export function shouldShowReminder(
 
   if (food.used) return false;
 
-  if (food.status === "used" || food.status === "disposed") {
+  if (
+    food.status === "used" ||
+    food.status === "disposed"
+  ) {
     return false;
   }
 
-  const daysLeft = daysUntilExpiration(food.expiration_date);
+  const daysLeft = daysUntilExpiration(
+    food.expiration_date
+  );
 
-  // Expired food should NOT appear in "use soon" reminders.
+  // Expired food should not appear in "use soon" reminders.
   if (daysLeft < 0) return false;
 
-  // Show food from the user's chosen reminder window through today.
+  // Include food from the user's chosen reminder
+  // window through its expiration date.
   return daysLeft <= preferences.days_before;
 }
 
-export function getReminderMessage(food: ReminderFood) {
-  const daysLeft = daysUntilExpiration(food.expiration_date);
+export function getReminderMessage(
+  food: ReminderFood
+) {
+  const daysLeft = daysUntilExpiration(
+    food.expiration_date
+  );
 
   if (daysLeft === 0) {
     return `${food.name} • Best used today`;
@@ -61,13 +73,16 @@ export function getKitchenSummary(
   foods: ReminderFood[],
   preferences: ReminderPreferences
 ) {
-  const reminderFoods = getFoodsNeedingReminders(
-    foods,
-    preferences
-  );
+  const reminderFoods =
+    getFoodsNeedingReminders(
+      foods,
+      preferences
+    );
 
   return {
     count: reminderFoods.length,
-    reminders: reminderFoods.map(getReminderMessage),
+    reminders: reminderFoods.map(
+      getReminderMessage
+    ),
   };
 }
