@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -19,7 +20,8 @@ type Preferences = {
 };
 
 export default function SettingsPage() {
-  const [preferences, setPreferences] = useState<Preferences | null>(null);
+  const [preferences, setPreferences] =
+    useState<Preferences | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -73,7 +75,9 @@ export default function SettingsPage() {
     void loadPreferences();
   }, []);
 
-  async function updatePreferences(changes: Partial<Preferences>) {
+  async function updatePreferences(
+    changes: Partial<Preferences>
+  ) {
     if (!preferences) return;
 
     const updated = {
@@ -109,14 +113,6 @@ export default function SettingsPage() {
     setRegisteringPush(true);
     setPushMessage("Requesting notification permission...");
 
-    let registrationListener:
-      | Awaited<ReturnType<typeof PushNotifications.addListener>>
-      | undefined;
-
-    let errorListener:
-      | Awaited<ReturnType<typeof PushNotifications.addListener>>
-      | undefined;
-
     try {
       const permission =
         await PushNotifications.requestPermissions();
@@ -125,53 +121,108 @@ export default function SettingsPage() {
         setPushMessage(
           "Notifications are not allowed. You can enable them in your iPhone Settings."
         );
+        setRegisteringPush(false);
         return;
       }
 
-      registrationListener =
-        await PushNotifications.addListener(
-          "registration",
-          (token) => {
-            console.log(
-              "Apple push registration succeeded:",
-              token.value
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        setPushMessage(
+          "Please log in before enabling push notifications."
+        );
+        setRegisteringPush(false);
+        return;
+      }
+
+      // Prevent duplicate listeners if the button is tapped again.
+      await PushNotifications.removeAllListeners();
+
+      await PushNotifications.addListener(
+        "registration",
+        async (token) => {
+          try {
+            setPushMessage(
+              "Saving your iPhone registration..."
             );
+
+            const { error } = await supabase
+              .from("push_tokens")
+              .upsert(
+                {
+                  user_id: session.user.id,
+                  token: token.value,
+                  platform: "ios",
+                  updated_at: new Date().toISOString(),
+                },
+                {
+                  onConflict: "user_id,token",
+                }
+              );
+
+            if (error) {
+              console.error(
+                "Failed to save push token:",
+                error
+              );
+
+              setPushMessage(
+                "Your iPhone registered with Apple, but Conserva couldn't save the device. Please try again."
+              );
+              return;
+            }
 
             setPushMessage(
-              "Push notifications enabled! Your iPhone registered successfully."
+              "Push notifications enabled! Your iPhone is connected to Conserva."
             );
-
-            setRegisteringPush(false);
-          }
-        );
-
-      errorListener =
-        await PushNotifications.addListener(
-          "registrationError",
-          (error) => {
+          } catch (error) {
             console.error(
-              "Apple push registration failed:",
+              "Push token saving failed:",
               error
             );
 
             setPushMessage(
-              "Could not register this iPhone for push notifications. Please try again."
+              "Could not save your iPhone registration. Please try again."
             );
-
+          } finally {
             setRegisteringPush(false);
           }
-        );
+        }
+      );
 
-      setPushMessage("Registering your iPhone with Apple...");
+      await PushNotifications.addListener(
+        "registrationError",
+        (error) => {
+          console.error(
+            "Apple push registration failed:",
+            error
+          );
+
+          setPushMessage(
+            "Could not register this iPhone for push notifications. Please try again."
+          );
+
+          setRegisteringPush(false);
+        }
+      );
+
+      setPushMessage(
+        "Registering your iPhone with Apple..."
+      );
 
       await PushNotifications.register();
     } catch (error) {
-      console.error("Push notification setup failed:", error);
+      console.error(
+        "Push notification setup failed:",
+        error
+      );
 
       setPushMessage(
         "Something went wrong while enabling push notifications."
       );
-    } finally {
+
       setRegisteringPush(false);
     }
   }
@@ -179,7 +230,9 @@ export default function SettingsPage() {
   if (loading || !preferences) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#FAF7F0]">
-        <p className="text-[#8A8578]">Loading settings...</p>
+        <p className="text-[#8A8578]">
+          Loading settings...
+        </p>
       </main>
     );
   }
