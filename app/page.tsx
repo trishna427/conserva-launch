@@ -1,7 +1,48 @@
+"use client";
+
 import Link from "next/link";
 import { Leaf, CheckCircle2, ArrowRight } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
 export default function Home() {
+  const router = useRouter();
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+
+    async function checkSession() {
+      const {
+        data: { session },
+        error,
+      } = await supabase.auth.getSession();
+
+      if (!active) return;
+
+      if (!error && session) {
+        router.replace("/dashboard");
+      } else {
+        setCheckingSession(false);
+      }
+    }
+
+    checkSession();
+
+    return () => {
+      active = false;
+    };
+  }, [router]);
+
+  if (checkingSession) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#FAF7F0]">
+        <p className="text-[#8A8578]">Opening Conserva...</p>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-[#FAF7F0] text-[#2B2B26] flex justify-center">
       <section className="w-full max-w-[430px] min-h-screen px-6 py-8 flex flex-col justify-between">
@@ -37,30 +78,33 @@ export default function Home() {
             <CheckCircle2 className="text-[#3F6B4F]" />
             Track everything in your fridge, freezer & pantry
           </p>
+
           <p className="flex items-center gap-4">
             <CheckCircle2 className="text-[#3F6B4F]" />
             Gentle reminders before food turns bad
           </p>
+
           <p className="flex items-center gap-4">
             <CheckCircle2 className="text-[#3F6B4F]" />
             AI recipes built around what you already have
           </p>
         </div>
-        <div className="space-y-4 pt-10">
-  <Link
-    href="/signup"
-    className="flex w-full items-center justify-center gap-3 rounded-3xl bg-[#3F6B4F] py-5 text-lg font-bold text-white"
-  >
-    Get started <ArrowRight />
-  </Link>
 
-  <Link
-    href="/login"
-    className="block w-full rounded-3xl border-2 border-[#E7E2D6] py-5 text-center text-lg font-bold"
-  >
-    I already have an account
-  </Link>
-</div> 
+        <div className="space-y-4 pt-10">
+          <Link
+            href="/signup"
+            className="flex w-full items-center justify-center gap-3 rounded-3xl bg-[#3F6B4F] py-5 text-lg font-bold text-white"
+          >
+            Get started <ArrowRight />
+          </Link>
+
+          <Link
+            href="/login"
+            className="block w-full rounded-3xl border-2 border-[#E7E2D6] py-5 text-center text-lg font-bold"
+          >
+            I already have an account
+          </Link>
+        </div>
       </section>
     </main>
   );
