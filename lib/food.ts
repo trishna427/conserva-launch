@@ -14,7 +14,11 @@ export type FoodItem = {
 export function daysUntilExpiration(expirationDate: string) {
   const [year, month, day] = expirationDate.split("-").map(Number);
 
-  const today = new Date();
+  const today = new Date(
+    new Date().toLocaleString("en-US", {
+      timeZone: "America/Los_Angeles",
+    })
+  );
 
   const todayUTC = Date.UTC(
     today.getFullYear(),
