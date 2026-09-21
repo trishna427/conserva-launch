@@ -25,14 +25,25 @@ type ShelfLifeEstimate = {
   error?: string;
 };
 
+function formatLocalDate(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  return formatLocalDate(new Date());
 }
 
 function addDays(date: string, days: number) {
-  const result = new Date(`${date}T12:00:00`);
+  const [year, month, day] = date.split("-").map(Number);
+
+  const result = new Date(year, month - 1, day, 12);
   result.setDate(result.getDate() + days);
-  return result.toISOString().slice(0, 10);
+
+  return formatLocalDate(result);
 }
 
 const storageOptions = [
