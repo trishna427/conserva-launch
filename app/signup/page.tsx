@@ -38,10 +38,7 @@ export default function SignUpPage() {
       return;
     }
 
-    setMessage("Account created! Check your email, then log in.");
-    setTimeout(() => {
-      router.push("/login");
-    }, 1500);
+    router.replace("/dashboard");
   }
 
   return (
