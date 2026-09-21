@@ -12,14 +12,21 @@ export type FoodItem = {
 };
 
 export function daysUntilExpiration(expirationDate: string) {
+  const [year, month, day] = expirationDate.split("-").map(Number);
+
   const today = new Date();
-  const expiration = new Date(expirationDate);
 
-  today.setHours(0, 0, 0, 0);
-  expiration.setHours(0, 0, 0, 0);
+  const todayUTC = Date.UTC(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate()
+  );
 
-  const diff = expiration.getTime() - today.getTime();
-  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+  const expirationUTC = Date.UTC(year, month - 1, day);
+
+  return Math.round(
+    (expirationUTC - todayUTC) / (1000 * 60 * 60 * 24)
+  );
 }
 
 export function getFoodStatus(expirationDate: string) {
