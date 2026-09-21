@@ -28,6 +28,9 @@ export default function SettingsPage() {
   const [isNativeApp, setIsNativeApp] = useState(false);
   const [registeringPush, setRegisteringPush] = useState(false);
   const [pushMessage, setPushMessage] = useState("");
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   useEffect(() => {
     setIsNativeApp(
@@ -226,7 +229,48 @@ export default function SettingsPage() {
       setRegisteringPush(false);
     }
   }
-
+  async function deleteAccount() {
+    if (deletingAccount) return;
+  
+    setDeletingAccount(true);
+    setDeleteError("");
+  
+    try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+  
+      if (sessionError || !session) {
+        throw new Error("Your session has expired. Please sign in again.");
+      }
+  
+      const response = await fetch("/api/delete-account", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+  
+      const result = await response.json();
+  
+      if (!response.ok) {
+        throw new Error(
+          result.error || "We couldn't delete your account. Please try again."
+        );
+      }
+  
+      await supabase.auth.signOut();
+      window.location.replace("/");
+    } catch (error) {
+      setDeleteError(
+        error instanceof Error
+          ? error.message
+          : "Something went wrong. Please try again."
+      );
+      setDeletingAccount(false);
+    }
+  }
   if (loading || !preferences) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#FAF7F0]">
@@ -266,9 +310,65 @@ export default function SettingsPage() {
             </h2>
           </div>
 
-          <p className="text-[#8A8578]">
-            More account settings coming soon.
-          </p>
+          <div className="border-t border-[#E7E2D6] pt-4">
+  <p className="text-sm text-[#8A8578]">
+    Permanently remove your Conserva account and its associated data.
+  </p>
+
+  {!showDeleteConfirmation ? (
+    <button
+      type="button"
+      onClick={() => {
+        setDeleteError("");
+        setShowDeleteConfirmation(true);
+      }}
+      className="mt-4 text-sm font-semibold text-[#B4534B]"
+    >
+      Delete Account
+    </button>
+  ) : (
+    <div className="mt-4 rounded-2xl border border-[#E8C9C5] bg-[#FFF8F6] p-4">
+      <p className="font-semibold text-[#8F3833]">
+        Delete your account permanently?
+      </p>
+
+      <p className="mt-2 text-sm leading-6 text-[#7B625E]">
+        This will delete your Conserva account, saved food, recipes,
+        reminder preferences, and notification registrations. This
+        action cannot be undone.
+      </p>
+
+      {deleteError && (
+        <p role="alert" className="mt-3 text-sm text-[#B4534B]">
+          {deleteError}
+        </p>
+      )}
+
+      <div className="mt-4 flex flex-wrap gap-3">
+        <button
+          type="button"
+          onClick={() => {
+            setShowDeleteConfirmation(false);
+            setDeleteError("");
+          }}
+          disabled={deletingAccount}
+          className="rounded-xl border border-[#E7E2D6] bg-white px-4 py-2 text-sm font-semibold disabled:opacity-50"
+        >
+          Cancel
+        </button>
+
+        <button
+          type="button"
+          onClick={deleteAccount}
+          disabled={deletingAccount}
+          className="rounded-xl bg-[#B4534B] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+        >
+          {deletingAccount ? "Deleting..." : "Yes, delete my account"}
+        </button>
+      </div>
+    </div>
+  )}
+</div>
         </div>
 
         <div className="mb-6 rounded-3xl border border-[#E7E2D6] bg-white p-5">
